@@ -101,9 +101,8 @@ const Settings: React.FC = () => {
       if (response.data.status === 'updated') {
         toast.success('Configuration saved successfully');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save configuration');
-      console.error('Save config error:', error);
     } finally {
       setSaving(false);
     }

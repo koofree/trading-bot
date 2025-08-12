@@ -70,9 +70,8 @@ const MarketAnalysis: React.FC = () => {
       } else {
         toast.error('Failed to analyze report');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('Error uploading file');
-      console.error('Upload error:', error);
     } finally {
       setUploading(false);
     }

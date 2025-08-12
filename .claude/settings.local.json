@@ -36,7 +36,11 @@
       "Bash(npm run validate:*)",
       "Bash(npm run lint)",
       "Bash(npm run type-check:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "Bash(npm run validate:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx biome check:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }

@@ -54,9 +54,8 @@ const SignalMonitor: React.FC = () => {
       // Use WebSocket for real-time execution
       executeTrade(signal);
       toast.success('Trade order sent');
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to execute trade');
-      console.error('Trade execution error:', error);
     }
   };
 

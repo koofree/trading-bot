@@ -61,7 +61,6 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
   const { sendMessage, lastMessage, readyState } = useWebSocket(WS_URL, {
     onOpen: () => {
-      console.log('WebSocket connected');
       setConnected(true);
       toast.success('Connected to trading system');
 
@@ -76,12 +75,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       }, 100);
     },
     onClose: () => {
-      console.log('WebSocket disconnected');
       setConnected(false);
       toast.error('Disconnected from trading system');
     },
-    onError: (error: Event) => {
-      console.error('WebSocket error:', error);
+    onError: (_error: Event) => {
       // Only show error toast if not already disconnected
       if (connected) {
         toast.error('Connection error');
@@ -163,10 +160,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
           setPerformance(data.payload as Performance);
           break;
         case 'subscribed':
-          console.log('Subscribed to markets:', data.markets);
           break;
         default:
-          console.log('Unknown message type:', (data as any).type);
       }
     },
     [handleNewSignal, handleMarketData, handleTradeExecution]
@@ -177,9 +172,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       try {
         const data = JSON.parse(lastMessage.data) as WebSocketMessageData;
         handleWebSocketMessage(data);
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
+      } catch (_error) {}
     }
   }, [lastMessage, handleWebSocketMessage]);
 

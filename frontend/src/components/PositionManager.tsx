@@ -49,9 +49,8 @@ const PositionManager: React.FC = () => {
       // This would need to be implemented in the backend
       toast.success('Position close request sent');
       refetch();
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to close position');
-      console.error('Close position error:', error);
     }
   };
 
