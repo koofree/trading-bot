@@ -26,7 +26,13 @@
       "Bash(ollama pull:*)",
       "Bash(npm install:*)",
       "Bash(npm start)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss init:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm run build:*)",
+      "Bash(rm:*)",
+      "Bash(true)"
     ],
     "deny": []
   }
