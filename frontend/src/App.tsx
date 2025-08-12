@@ -1,14 +1,14 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type React from 'react';
 import { Toaster } from 'react-hot-toast';
-import { WebSocketProvider } from './contexts/WebSocketContext';
-import TradingDashboard from './components/TradingDashboard';
-import SignalMonitor from './components/SignalMonitor';
-import PositionManager from './components/PositionManager';
+import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import MarketAnalysis from './components/MarketAnalysis';
-import Settings from './components/Settings';
 import Navigation from './components/Navigation';
+import PositionManager from './components/PositionManager';
+import Settings from './components/Settings';
+import SignalMonitor from './components/SignalMonitor';
+import TradingDashboard from './components/TradingDashboard';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,7 +36,7 @@ const App: React.FC = () => {
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </div>
-            <Toaster 
+            <Toaster
               position="top-right"
               toastOptions={{
                 duration: 4000,

@@ -31,8 +31,12 @@
       "Bash(npx tailwindcss init:*)",
       "Bash(npm uninstall:*)",
       "Bash(npm run build:*)",
-      "Bash(rm:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(npm run format:*)",
+      "Bash(npm run validate:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run lint:*)"
     ],
     "deny": []
   }

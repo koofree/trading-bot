@@ -1,18 +1,18 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import useWebSocket from 'react-use-websocket';
+import type React from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { 
-  Signal, 
-  Position, 
-  MarketData, 
-  Performance, 
-  PriceHistory, 
-  PricePoint 
-} from '../types';
+import useWebSocket from 'react-use-websocket';
+import type { MarketData, Performance, Position, PriceHistory, PricePoint, Signal } from '../types';
 
 // WebSocket message types
 interface WebSocketMessageData {
-  type: 'signal' | 'market_data' | 'positions_update' | 'trade_execution' | 'performance_update' | 'subscribed';
+  type:
+    | 'signal'
+    | 'market_data'
+    | 'positions_update'
+    | 'trade_execution'
+    | 'performance_update'
+    | 'subscribed';
   payload?: any;
   markets?: string[];
 }
@@ -55,7 +55,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     total_trades: 0,
     open_positions: 0,
     max_positions: 5,
-    available_balance: 0
+    available_balance: 0,
   });
   const [priceHistory, setPriceHistory] = useState<PriceHistory>({});
 
@@ -64,13 +64,15 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       console.log('WebSocket connected');
       setConnected(true);
       toast.success('Connected to trading system');
-      
+
       // Subscribe to KRW-ETH by default
       setTimeout(() => {
-        sendMessage(JSON.stringify({
-          type: 'subscribe',
-          markets: ['KRW-ETH']
-        }));
+        sendMessage(
+          JSON.stringify({
+            type: 'subscribe',
+            markets: ['KRW-ETH'],
+          })
+        );
       }, 100);
     },
     onClose: () => {
@@ -88,21 +90,23 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     shouldReconnect: () => true,
     reconnectInterval: 3000,
     reconnectAttempts: 100,
-    share: true  // Share the same WebSocket connection across components
+    share: true, // Share the same WebSocket connection across components
   });
 
   const handleNewSignal = useCallback((signal: Signal) => {
-    setSignals(prev => [signal, ...prev].slice(0, 50));
-    
+    setSignals((prev) => [signal, ...prev].slice(0, 50));
+
     if (signal.signal_type !== 'HOLD' && signal.strength > 0.6) {
       toast(
         <div>
           <strong>{signal.signal_type} Signal</strong>
-          <p>{signal.market} - Strength: {(signal.strength * 100).toFixed(1)}%</p>
+          <p>
+            {signal.market} - Strength: {(signal.strength * 100).toFixed(1)}%
+          </p>
         </div>,
         {
           icon: signal.signal_type === 'BUY' ? '📈' : '📉',
-          duration: 5000
+          duration: 5000,
         }
       );
     }
@@ -110,24 +114,24 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
   const handleMarketData = useCallback((data: { market: string; data: MarketData }) => {
     const { market, data: marketInfo } = data;
-    
-    setMarketData(prev => ({
+
+    setMarketData((prev) => ({
       ...prev,
-      [market]: marketInfo
+      [market]: marketInfo,
     }));
-    
+
     // Update price history for charts
-    setPriceHistory(prev => {
+    setPriceHistory((prev) => {
       const history = prev[market] || [];
       const newPoint: PricePoint = {
         time: new Date().toLocaleTimeString(),
-        price: marketInfo.trade_price
+        price: marketInfo.trade_price,
       };
       const newHistory = [...history, newPoint].slice(-50);
-      
+
       return {
         ...prev,
-        [market]: newHistory
+        [market]: newHistory,
       };
     });
   }, []);
@@ -140,30 +144,33 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     }
   }, []);
 
-  const handleWebSocketMessage = useCallback((data: WebSocketMessageData) => {
-    switch(data.type) {
-      case 'signal':
-        handleNewSignal(data.payload as Signal);
-        break;
-      case 'market_data':
-        handleMarketData(data.payload as { market: string; data: MarketData });
-        break;
-      case 'positions_update':
-        setPositions(data.payload as Position[]);
-        break;
-      case 'trade_execution':
-        handleTradeExecution(data.payload as TradeExecutionResult);
-        break;
-      case 'performance_update':
-        setPerformance(data.payload as Performance);
-        break;
-      case 'subscribed':
-        console.log('Subscribed to markets:', data.markets);
-        break;
-      default:
-        console.log('Unknown message type:', (data as any).type);
-    }
-  }, [handleNewSignal, handleMarketData, handleTradeExecution]);
+  const handleWebSocketMessage = useCallback(
+    (data: WebSocketMessageData) => {
+      switch (data.type) {
+        case 'signal':
+          handleNewSignal(data.payload as Signal);
+          break;
+        case 'market_data':
+          handleMarketData(data.payload as { market: string; data: MarketData });
+          break;
+        case 'positions_update':
+          setPositions(data.payload as Position[]);
+          break;
+        case 'trade_execution':
+          handleTradeExecution(data.payload as TradeExecutionResult);
+          break;
+        case 'performance_update':
+          setPerformance(data.payload as Performance);
+          break;
+        case 'subscribed':
+          console.log('Subscribed to markets:', data.markets);
+          break;
+        default:
+          console.log('Unknown message type:', (data as any).type);
+      }
+    },
+    [handleNewSignal, handleMarketData, handleTradeExecution]
+  );
 
   useEffect(() => {
     if (lastMessage !== null) {
@@ -176,23 +183,34 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     }
   }, [lastMessage, handleWebSocketMessage]);
 
-  const subscribeToMarkets = useCallback((markets: string[]) => {
-    if (readyState === 1) { // WebSocket.OPEN
-      sendMessage(JSON.stringify({
-        type: 'subscribe',
-        markets: markets
-      }));
-    }
-  }, [sendMessage, readyState]);
+  const subscribeToMarkets = useCallback(
+    (markets: string[]) => {
+      if (readyState === 1) {
+        // WebSocket.OPEN
+        sendMessage(
+          JSON.stringify({
+            type: 'subscribe',
+            markets: markets,
+          })
+        );
+      }
+    },
+    [sendMessage, readyState]
+  );
 
-  const executeTrade = useCallback((signal: Signal) => {
-    if (readyState === 1) {
-      sendMessage(JSON.stringify({
-        type: 'execute_trade',
-        signal: signal
-      }));
-    }
-  }, [sendMessage, readyState]);
+  const executeTrade = useCallback(
+    (signal: Signal) => {
+      if (readyState === 1) {
+        sendMessage(
+          JSON.stringify({
+            type: 'execute_trade',
+            signal: signal,
+          })
+        );
+      }
+    },
+    [sendMessage, readyState]
+  );
 
   const value: WebSocketContextType = {
     connected,
@@ -203,14 +221,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     priceHistory,
     sendMessage,
     subscribeToMarkets,
-    executeTrade
+    executeTrade,
   };
 
-  return (
-    <WebSocketContext.Provider value={value}>
-      {children}
-    </WebSocketContext.Provider>
-  );
+  return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;
 };
 
 export const useWebSocketContext = (): WebSocketContextType => {

@@ -7,6 +7,7 @@
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
+    "ajv": "^8.17.1",
     "axios": "^1.6.2",
     "chart.js": "^4.4.0",
     "react": "^18.2.0",
@@ -24,13 +25,13 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
+    "eject": "react-scripts eject",
+    "lint": "biome check src",
+    "lint:fix": "biome check --write src",
+    "format": "biome format --write src",
+    "format:check": "biome format src",
+    "type-check": "tsc --noEmit",
+    "validate": "npm run type-check && npm run lint"
   },
   "browserslist": {
     "production": [
@@ -45,6 +46,7 @@
     ]
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.1.4",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.2.1",
     "@types/react": "^19.1.10",
