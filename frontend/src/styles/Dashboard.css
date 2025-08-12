@@ -1,0 +1,183 @@
+/* Dashboard Specific Styles */
+.trading-dashboard {
+  animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Metric Cards */
+.metric-card {
+  padding: 20px !important;
+  border-radius: 12px !important;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+}
+
+.metric-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Market Cards */
+.market-card {
+  height: 100%;
+  transition: all 0.3s ease;
+  border-radius: 12px !important;
+}
+
+.market-card:hover {
+  transform: scale(1.02);
+}
+
+.market-header {
+  margin-bottom: 16px;
+}
+
+.chart-container {
+  position: relative;
+  width: 100%;
+}
+
+/* Signal Cards */
+.signal-card {
+  transition: all 0.3s ease;
+  border-radius: 12px !important;
+  background: white;
+}
+
+.signal-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+
+.signal-compact {
+  padding: 12px;
+  border-bottom: 1px solid #e0e0e0;
+  transition: background-color 0.3s ease;
+}
+
+.signal-compact:hover {
+  background-color: #f5f5f5;
+}
+
+.signal-compact:last-child {
+  border-bottom: none;
+}
+
+.signals-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.signals-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.signals-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.signals-list::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.signals-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Position Cards */
+.position-card {
+  height: 100%;
+  transition: all 0.3s ease;
+  border-radius: 12px !important;
+  background: white;
+}
+
+.position-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Dashboard Paper */
+.dashboard-paper {
+  background: white;
+  margin-bottom: 24px;
+}
+
+/* Performance Section */
+.performance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* Real-time Updates Animation */
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(102, 126, 234, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(102, 126, 234, 0);
+  }
+}
+
+.live-update {
+  animation: pulse 2s infinite;
+}
+
+/* Settings Section */
+.settings-section {
+  background: white;
+  margin-bottom: 24px;
+}
+
+.settings-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  margin-bottom: 24px;
+}
+
+.settings-header h5,
+.settings-header p {
+  color: white !important;
+}
+
+/* Upload Section */
+.upload-dropzone {
+  transition: all 0.3s ease;
+}
+
+.upload-dropzone:hover {
+  transform: scale(1.02);
+}
+
+/* Monitor Header */
+.monitor-header,
+.manager-header,
+.analysis-header {
+  margin-bottom: 24px;
+  background: white;
+}
