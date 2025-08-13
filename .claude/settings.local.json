@@ -44,7 +44,8 @@
       "Bash(black:*)",
       "Bash(ruff check:*)",
       "Bash(tree:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(mypy:*)"
     ],
     "deny": []
   }

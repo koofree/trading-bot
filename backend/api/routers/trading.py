@@ -109,3 +109,53 @@ async def run_backtest(backtest_request: Dict[str, Any]) -> Dict[str, Any]:
     """Run backtest on historical data"""
     # This would implement backtesting logic
     return {"status": "not_implemented"}
+
+
+@router.get("/test-llm")
+async def test_llm() -> Dict[str, Any]:
+    """Test LLM connection and response"""
+    try:
+        from api.main import trading_system
+        
+        # Test with a simple prompt
+        test_prompt = """Analyze this simplified market data and respond with JSON:
+        
+        Current price: $50000
+        24h change: +5%
+        Volume: High
+        
+        Provide a JSON response with these keys:
+        - sentiment_score (number between -1 and 1)
+        - confidence (number between 0 and 1)
+        - recommendation (BUY/SELL/HOLD)
+        - reasoning (short text)
+        
+        Example format:
+        {"sentiment_score": 0.5, "confidence": 0.7, "recommendation": "BUY", "reasoning": "Positive trend"}"""
+        
+        # Call the LLM directly
+        llm_analyzer = trading_system.llm_analyzer
+        response = await llm_analyzer._call_llm_async(test_prompt)
+        
+        # Try to parse the response
+        parsed = llm_analyzer._parse_sentiment_response(response)
+        
+        return {
+            "raw_response": response[:1000] if response else None,
+            "parsed_sentiment": {
+                "score": parsed.score,
+                "confidence": parsed.confidence,
+                "recommendation": parsed.recommendation,
+                "reasoning": parsed.reasoning
+            },
+            "llm_provider": llm_analyzer.provider.__class__.__name__ if llm_analyzer.provider else "None",
+            "llm_model": llm_analyzer.model
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing LLM: {e}", exc_info=True)
+        return {
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "llm_configured": bool(trading_system.llm_analyzer.provider if hasattr(trading_system, 'llm_analyzer') else False)
+        }

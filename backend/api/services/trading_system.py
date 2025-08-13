@@ -188,7 +188,18 @@ class TradingSystem:
             candles = self.upbit.get_candles(market, "minutes", 60, 200)
 
             if candles:
+                # Convert to DataFrame and rename columns
                 df = pd.DataFrame(candles)
+                df = df.rename(
+                    columns={
+                        "trade_price": "close",
+                        "opening_price": "open",
+                        "high_price": "high",
+                        "low_price": "low",
+                        "candle_acc_trade_volume": "volume",
+                        "candle_date_time_kst": "timestamp",
+                    }
+                )
                 df["market"] = market
 
                 # Generate signal without LLM for speed
