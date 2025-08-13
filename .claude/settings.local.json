@@ -40,7 +40,11 @@
       "Bash(npm run validate:*)",
       "Bash(npm run lint:*)",
       "Bash(npx biome check:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(black:*)",
+      "Bash(ruff check:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }
