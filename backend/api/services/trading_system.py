@@ -16,6 +16,7 @@ from api.core.config import Settings
 from api.core.websocket import ConnectionManager
 from services.document_processor import DocumentProcessor
 from services.llm_analyzer import LLMAnalyzer
+from services.market_data_preprocessor import MarketDataPreprocessor
 from services.signal_generator import SignalGenerator
 from services.trading_engine import TradingEngine
 from services.upbit_connector import UpbitConnector
@@ -34,6 +35,9 @@ class TradingSystem:
         self.upbit = UpbitConnector(
             settings.upbit_access_key, settings.upbit_secret_key
         )
+
+        # Initialize market data preprocessor
+        self.market_preprocessor = MarketDataPreprocessor(self.upbit)
 
         self.signal_generator = SignalGenerator(settings.get_config_dict())
 
@@ -86,11 +90,16 @@ class TradingSystem:
         while self.is_running:
             try:
                 for market in self.monitored_markets:
-                    # Get market data
+                    # Get enriched market data using preprocessor
+                    enriched_data = self.market_preprocessor.get_enriched_market_data(
+                        market
+                    )
+
+                    # Get candles for signal generation
                     candles = self.upbit.get_candles(market, "minutes", 60, 200)
 
-                    if candles:
-                        # Convert to DataFrame and rename columns
+                    if candles and enriched_data:
+                        # Convert to DataFrame for technical analysis
                         df = pd.DataFrame(candles)
                         df = df.rename(
                             columns={
@@ -104,15 +113,9 @@ class TradingSystem:
                         )
                         df["market"] = market
 
-                        # Get LLM analysis
-                        market_data = {
-                            "current_price": candles[0]["trade_price"],
-                            "volume_24h": candles[0]["candle_acc_trade_volume"],
-                            "price_change_24h": candles[0].get("change_rate", 0),
-                        }
-
+                        # Get LLM analysis with properly preprocessed data
                         sentiment = await self.llm_analyzer.analyze_market_sentiment(
-                            [], market_data, []
+                            [], enriched_data, []
                         )
 
                         llm_analysis = {
@@ -184,10 +187,29 @@ class TradingSystem:
         signals = []
 
         for market in markets:
-            # Get market data
-            candles = self.upbit.get_candles(market, "minutes", 60, 200)
+            try:
+                # Get enriched market data
+                logger.info(f"Fetching enriched data for market: {market}")
+                enriched_data = self.market_preprocessor.get_enriched_market_data(
+                    market
+                )
 
-            if candles:
+                # Log enriched data for debugging
+                logger.info(
+                    f"Enriched data: Price={enriched_data.get('current_price', 0):,.0f}, "
+                    f"24h Change={enriched_data.get('price_change_24h', 0):.2f}%, "
+                    f"Volume Ratio={enriched_data.get('volume_ratio', 0):.2f}"
+                )
+
+                # Get candles for technical analysis
+                candles = self.upbit.get_candles(market, "minutes", 60, 200)
+
+                if not candles:
+                    logger.warning(f"No candle data received for {market}")
+                    continue
+
+                logger.info(f"Received {len(candles)} candles for {market}")
+
                 # Convert to DataFrame and rename columns
                 df = pd.DataFrame(candles)
                 df = df.rename(
@@ -202,9 +224,38 @@ class TradingSystem:
                 )
                 df["market"] = market
 
-                # Generate signal without LLM for speed
-                signal = self.signal_generator.generate_signal(df, None)
-                signals.append(signal.to_dict())
+                # Generate signal with enriched data context
+                # Create simple LLM analysis from enriched data
+                llm_analysis = {
+                    "sentiment_score": 0.5
+                    if enriched_data.get("momentum") == "bullish"
+                    else -0.5
+                    if enriched_data.get("momentum") == "bearish"
+                    else 0,
+                    "confidence": 0.7
+                    if enriched_data.get("volume_ratio", 1) > 1.2
+                    else 0.5,
+                    "summary": f"{enriched_data.get('momentum', 'neutral')} momentum with {enriched_data.get('price_change_24h', 0):.1f}% change",
+                }
+
+                signal = self.signal_generator.generate_signal(df, llm_analysis)
+
+                # Add enriched data to signal
+                signal_dict = signal.to_dict()
+                signal_dict["market_data"] = {
+                    "current_price": enriched_data.get("current_price"),
+                    "price_change_24h": enriched_data.get("price_change_24h"),
+                    "volume_24h": enriched_data.get("volume_24h_quote"),
+                    "momentum": enriched_data.get("momentum"),
+                }
+
+                signals.append(signal_dict)
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing signals for {market}: {e}", exc_info=True
+                )
+                continue
 
         return signals
 

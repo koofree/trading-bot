@@ -1,0 +1,27 @@
+{
+    "folders": [
+        {
+            "name": "Backend",
+            "path": "backend"
+        },
+        {
+            "name": "Frontend",
+            "path": "frontend"
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder:Backend}/venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "python.terminal.executeInFileDir": false,
+        "python.testing.cwd": "${workspaceFolder:Backend}",
+        "python.testing.unittestEnabled": true,
+        "python.testing.pytestEnabled": false,
+        "python.testing.unittestArgs": [
+            "-v",
+            "-s",
+            "./tests",
+            "-p",
+            "test_*.py"
+        ]
+    }
+}

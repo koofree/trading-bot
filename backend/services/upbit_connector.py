@@ -65,10 +65,37 @@ class UpbitConnector:
         interval: 'minutes', 'days', 'weeks', 'months'
         unit: 1, 3, 5, 15, 30, 60, 240 (for minutes)
         """
-        endpoint = f"{self.base_url}/candles/{interval}/{unit}"
-        params = {"market": market, "count": count}
-        response = requests.get(endpoint, params=params)
-        return response.json()
+        try:
+            endpoint = f"{self.base_url}/candles/{interval}/{unit}"
+            params = {"market": market, "count": count}
+
+            logger.info(f"Fetching candles from: {endpoint} with params: {params}")
+            response = requests.get(endpoint, params=params)
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Upbit API error: {response.status_code} - {response.text}"
+                )
+                return []
+
+            data = response.json()
+
+            # Check if response is an error
+            if isinstance(data, dict) and "error" in data:
+                logger.error(f"Upbit API returned error: {data}")
+                return []
+
+            logger.info(
+                f"Successfully fetched {len(data) if isinstance(data, list) else 0} candles"
+            )
+            return data if isinstance(data, list) else []
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error fetching candles: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching candles: {e}")
+            return []
 
     def get_recent_trades(self, market: str, count: int = 100) -> List[Dict]:
         """Get recent trades for a market"""

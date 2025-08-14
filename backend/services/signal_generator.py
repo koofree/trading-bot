@@ -66,6 +66,17 @@ class SignalGenerator:
             if missing_columns:
                 logger.warning(f"Missing columns in DataFrame: {missing_columns}")
                 logger.warning(f"Available columns: {df.columns.tolist()}")
+                # Return some default indicators instead of empty dict
+                if "close" in df.columns:
+                    current_price = df["close"].iloc[-1] if len(df) > 0 else 0
+                    indicators["current_price"] = current_price
+                    indicators["price_change"] = (
+                        (df["close"].iloc[-1] - df["close"].iloc[0])
+                        / df["close"].iloc[0]
+                        * 100
+                        if len(df) > 1
+                        else 0
+                    )
                 return indicators
 
             # Moving Averages
@@ -207,6 +218,10 @@ class SignalGenerator:
         # Determine final signal
         min_confidence = self.config.get("min_confidence", 0.6)
 
+        # Log the scores for debugging
+        logger.info(f"Signal scores - Buy: {buy_score:.2f}, Sell: {sell_score:.2f}")
+        logger.info(f"Signal reasons: {reasons}")
+
         if buy_score > min_confidence and buy_score > sell_score * 1.2:
             signal_type = SignalType.BUY
             strength = min(buy_score, 1.0)
@@ -215,9 +230,9 @@ class SignalGenerator:
             strength = min(sell_score, 1.0)
         else:
             signal_type = SignalType.HOLD
-            strength = 0
+            strength = max(buy_score, sell_score)  # Show the stronger signal strength
             if not reasons:
-                reasons.append("No clear signal")
+                reasons.append("Neutral market conditions")
 
         # Calculate position size
         volume = self._calculate_position_size(strength, current["close"])

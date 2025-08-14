@@ -99,7 +99,9 @@ class OllamaProvider(LLMProvider):
             },
         }
 
-        logger.info(f"Ollama request - Model: {self.model}, Endpoint: {self.api_endpoint}")
+        logger.info(
+            f"Ollama request - Model: {self.model}, Endpoint: {self.api_endpoint}"
+        )
         logger.debug(f"Ollama payload: {json.dumps(payload, indent=2)[:500]}")
 
         try:
@@ -114,12 +116,14 @@ class OllamaProvider(LLMProvider):
                     if response.status == 200:
                         data = await response.json()
                         logger.info(f"Ollama response keys: {data.keys()}")
-                        
+
                         content = data.get("message", {}).get("content", "")
                         if not content:
-                            logger.warning(f"Empty content in Ollama response. Full response: {json.dumps(data)[:500]}")
+                            logger.warning(
+                                f"Empty content in Ollama response. Full response: {json.dumps(data)[:500]}"
+                            )
                             return "{}"
-                        
+
                         logger.info(f"Ollama content received, length: {len(content)}")
                         logger.debug(f"Ollama content preview: {content[:200]}")
                         return content

@@ -73,24 +73,46 @@ class LLMAnalyzer:
     async def analyze_market_sentiment(
         self, news_data: List[Dict], market_data: Dict, uploaded_reports: List[str]
     ) -> MarketSentiment:
-        """Comprehensive market analysis using LLM"""
+        """Comprehensive market analysis using LLM or rule-based fallback"""
 
         try:
-            # Prepare context from all sources
-            context = await self._prepare_comprehensive_context(
-                news_data, market_data, uploaded_reports
-            )
+            # Try LLM analysis first if provider is available
+            if self.provider:
+                # Prepare context from all sources
+                context = await self._prepare_comprehensive_context(
+                    news_data, market_data, uploaded_reports
+                )
 
-            prompt = self._create_analysis_prompt(context)
+                prompt = self._create_analysis_prompt(context)
+                response = await self._call_llm_async(prompt)
+                sentiment = self._parse_sentiment_response(response)
 
-            response = await self._call_llm_async(prompt)
-            sentiment = self._parse_sentiment_response(response)
+                # Check if LLM gave meaningful results (not template values)
+                if sentiment and sentiment.key_factors:
+                    # Check if it's not just placeholder values
+                    placeholder_factors = ["factor1", "factor2", "factor3"]
+                    if not any(
+                        factor in placeholder_factors
+                        for factor in sentiment.key_factors[:3]
+                    ):
+                        logger.info("Using LLM-based sentiment analysis")
+                        return sentiment
 
-            return sentiment
+                logger.warning(
+                    "LLM returned template values, falling back to rule-based analysis"
+                )
+
+            # Fallback to rule-based analysis
+            logger.info("Using rule-based sentiment analysis")
+            return self._create_rule_based_sentiment(market_data)
 
         except Exception as e:
             logger.error(f"Error in market sentiment analysis: {e}")
-            return self._create_neutral_sentiment()
+            # Try rule-based as last resort
+            try:
+                return self._create_rule_based_sentiment(market_data)
+            except:
+                return self._create_neutral_sentiment()
 
     async def _prepare_comprehensive_context(
         self, news_data: List[Dict], market_data: Dict, uploaded_reports: List[str]
@@ -158,32 +180,38 @@ class LLMAnalyzer:
     def _create_analysis_prompt(self, context: Dict) -> str:
         """Create a structured prompt for LLM analysis"""
 
+        market_data = context.get("market_data", {})
+
+        # Create actual analysis based on the data
+        price_change = market_data.get("price_change_24h", 0)
+        volume = market_data.get("volume_24h", 0)
+        current_price = market_data.get("current_price", 0)
+
         # Create a simpler, more direct prompt for JSON output
-        return f"""Analyze this crypto market data and respond with ONLY a JSON object.
+        return f"""You are analyzing cryptocurrency market data. Based on the data below, provide your analysis.
 
-MARKET DATA:
-{json.dumps(context.get('market_data', {}), indent=2)[:500]}
+Current price: ${current_price:.2f}
+24h price change: {price_change:.2f}%
+24h volume: ${volume:.2f}
 
-NEWS SUMMARY: {context.get('news_summary', 'No news')[:200]}
+NEWS: {context.get('news_summary', 'No recent news')[:100]}
 
-IMPORTANT INSTRUCTIONS:
-1. Output ONLY valid JSON, no other text
-2. Do not use markdown formatting or code blocks
-3. Do not include any explanations before or after the JSON
-4. Use exactly these keys in your JSON response
+Analyze this data and respond with ONLY a single JSON object (not an array).
+Do not include the market data in your response.
+Do not use markdown or code blocks.
 
-RESPOND WITH THIS EXACT JSON STRUCTURE:
+Your response must be EXACTLY in this format (replace the placeholder values with your actual analysis):
 {{
-    "sentiment_score": 0.0,
-    "confidence": 0.5,
-    "key_factors": ["factor1", "factor2", "factor3"],
-    "risks": ["risk1", "risk2"],
-    "opportunities": ["opportunity1", "opportunity2"],
+    "sentiment_score": -0.2,
+    "confidence": 0.7,
+    "key_factors": ["high volume indicates interest", "price stable", "no major news"],
+    "risks": ["market volatility", "regulatory uncertainty"],
+    "opportunities": ["potential breakout", "accumulation phase"],
     "recommendation": "HOLD",
-    "reasoning": "Brief explanation here"
+    "reasoning": "Market shows stability with moderate volume, suggesting consolidation phase"
 }}
 
-JSON:"""
+JSON RESPONSE:"""
 
     async def _call_llm_async(self, prompt: str) -> str:
         """Call LLM API asynchronously using configured provider"""
@@ -195,61 +223,118 @@ JSON:"""
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a JSON API that analyzes cryptocurrency markets. You MUST respond with ONLY valid JSON, no explanations or additional text. Never use markdown code blocks or backticks.",
+                    "content": "You are a cryptocurrency market analyst API. Analyze the provided market data and return your analysis as a JSON object. Important: 1) Output ONLY valid JSON, 2) Do not echo the input data, 3) Provide real analysis based on the data, not placeholder text, 4) Never use markdown formatting.",
                 },
                 {"role": "user", "content": prompt},
             ]
 
             logger.info(f"Calling LLM provider: {self.provider.__class__.__name__}")
             logger.debug(f"Prompt length: {len(prompt)} chars")
-            
+
             response = await self.provider.chat_completion(
-                messages=messages, temperature=0.3, max_tokens=1000
+                messages=messages, temperature=0.7, max_tokens=1000
             )
-            
-            logger.info(f"LLM response received - Type: {type(response)}, Length: {len(str(response))}")
+
+            logger.info(
+                f"LLM response received - Type: {type(response)}, Length: {len(str(response))}"
+            )
             logger.debug(f"LLM response preview: {str(response)[:200]}")
-            
+
             return response
         except Exception as e:
             logger.error(f"Error calling LLM: {e}")
-            logger.error(f"Provider: {self.provider.__class__.__name__ if self.provider else 'None'}")
+            logger.error(
+                f"Provider: {self.provider.__class__.__name__ if self.provider else 'None'}"
+            )
             raise
 
     def _extract_json_from_text(self, text: str) -> Optional[Dict]:
         """Extract JSON from text that might contain extra content"""
         if not text:
             return None
-        
+
         # Try different extraction methods
         extraction_methods = [
-            # Method 1: Raw JSON parsing
-            lambda t: json.loads(t),
-            
+            # Method 1: Raw JSON parsing (handles both dict and array)
+            lambda t: self._extract_dict_from_json(json.loads(t)),
             # Method 2: Find JSON between curly braces
-            lambda t: json.loads(re.search(r'\{.*\}', t, re.DOTALL).group()) if re.search(r'\{.*\}', t, re.DOTALL) else None,
-            
+            lambda t: json.loads(re.search(r"\{.*\}", t, re.DOTALL).group())
+            if re.search(r"\{.*\}", t, re.DOTALL)
+            else None,
             # Method 3: Remove common prefixes/suffixes
-            lambda t: json.loads(t.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()),
-            
+            lambda t: self._extract_dict_from_json(
+                json.loads(
+                    t.strip()
+                    .removeprefix("```json")
+                    .removeprefix("```")
+                    .removesuffix("```")
+                    .strip()
+                )
+            ),
             # Method 4: Find JSON after common phrases
-            lambda t: json.loads(t.split("JSON:")[-1].strip()) if "JSON:" in t else None,
-            lambda t: json.loads(t.split("json:")[-1].strip()) if "json:" in t else None,
-            lambda t: json.loads(t.split("Output:")[-1].strip()) if "Output:" in t else None,
-            
+            lambda t: self._extract_dict_from_json(
+                json.loads(t.split("JSON:")[-1].strip())
+            )
+            if "JSON:" in t
+            else None,
+            lambda t: self._extract_dict_from_json(
+                json.loads(t.split("json:")[-1].strip())
+            )
+            if "json:" in t
+            else None,
+            lambda t: self._extract_dict_from_json(
+                json.loads(t.split("Output:")[-1].strip())
+            )
+            if "Output:" in t
+            else None,
             # Method 5: Extract from markdown code block
-            lambda t: json.loads(re.search(r'```(?:json)?\s*(\{.*?\})\s*```', t, re.DOTALL).group(1)) if re.search(r'```(?:json)?\s*(\{.*?\})\s*```', t, re.DOTALL) else None,
+            lambda t: json.loads(
+                re.search(r"```(?:json)?\s*(\{.*?\})\s*```", t, re.DOTALL).group(1)
+            )
+            if re.search(r"```(?:json)?\s*(\{.*?\})\s*```", t, re.DOTALL)
+            else None,
+            # Method 6: Handle array with sentiment object
+            lambda t: self._extract_dict_from_json(
+                json.loads(re.search(r"\[.*\]", t, re.DOTALL).group())
+            )
+            if re.search(r"\[.*\]", t, re.DOTALL)
+            else None,
         ]
-        
+
         for method in extraction_methods:
             try:
                 result = method(text)
                 if result and isinstance(result, dict):
-                    logger.debug(f"Successfully extracted JSON using method: {method.__doc__ or 'lambda'}")
-                    return result
+                    # Check if it has the expected sentiment keys
+                    if any(
+                        key in result
+                        for key in ["sentiment_score", "confidence", "recommendation"]
+                    ):
+                        logger.debug(
+                            f"Successfully extracted JSON using method: {method.__doc__ or 'lambda'}"
+                        )
+                        return result
             except (json.JSONDecodeError, AttributeError, TypeError):
                 continue
-        
+
+        return None
+
+    def _extract_dict_from_json(self, json_data) -> Optional[Dict]:
+        """Extract dictionary from JSON that might be an array or dict"""
+        if isinstance(json_data, dict):
+            return json_data
+        elif isinstance(json_data, list):
+            # Look for sentiment object in array
+            for item in json_data:
+                if isinstance(item, dict) and any(
+                    key in item
+                    for key in ["sentiment_score", "confidence", "recommendation"]
+                ):
+                    return item
+            # If no sentiment object found, return the last dict in array
+            for item in reversed(json_data):
+                if isinstance(item, dict):
+                    return item
         return None
 
     def _parse_sentiment_response(self, response: str) -> MarketSentiment:
@@ -266,13 +351,15 @@ JSON:"""
 
             # Try to extract JSON using our robust extraction method
             data = self._extract_json_from_text(response)
-            
+
             if not data:
-                logger.error(f"Could not extract JSON from response: '{response[:500]}'")
+                logger.error(
+                    f"Could not extract JSON from response: '{response[:500]}'"
+                )
                 return self._create_neutral_sentiment()
 
             logger.info(f"Successfully parsed JSON with keys: {data.keys()}")
-            
+
             # Ensure we have the required fields with defaults
             return MarketSentiment(
                 score=float(data.get("sentiment_score", 0)),
@@ -302,6 +389,80 @@ JSON:"""
             opportunities=["Unable to identify opportunities"],
             recommendation="HOLD",
             reasoning="Unable to perform analysis at this time",
+        )
+
+    def _create_rule_based_sentiment(self, market_data: Dict) -> MarketSentiment:
+        """Create sentiment based on simple rules when LLM fails"""
+        score = 0.0
+        confidence = 0.5
+        factors = []
+        risks = []
+        opportunities = []
+
+        # Analyze price change
+        price_change = market_data.get("price_change_24h", 0)
+        if price_change > 5:
+            score += 0.3
+            factors.append(f"Strong price increase: {price_change:.1f}%")
+            opportunities.append("Momentum trading opportunity")
+            risks.append("Potential overbought conditions")
+        elif price_change > 2:
+            score += 0.1
+            factors.append(f"Moderate price increase: {price_change:.1f}%")
+        elif price_change < -5:
+            score -= 0.3
+            factors.append(f"Strong price decline: {price_change:.1f}%")
+            risks.append("Continued selling pressure")
+            opportunities.append("Potential bounce from oversold")
+        elif price_change < -2:
+            score -= 0.1
+            factors.append(f"Moderate price decline: {price_change:.1f}%")
+        else:
+            factors.append(f"Stable price: {price_change:.1f}%")
+
+        # Analyze volume
+        volume = market_data.get("volume_24h", 0)
+        if volume > 0:
+            if (
+                price_change > 0
+                and volume > market_data.get("avg_volume", volume) * 1.5
+            ):
+                score += 0.2
+                factors.append("High volume on price increase")
+                confidence += 0.1
+            elif (
+                price_change < 0
+                and volume > market_data.get("avg_volume", volume) * 1.5
+            ):
+                score -= 0.1
+                factors.append("High volume on price decrease")
+                risks.append("Strong selling volume")
+
+        # Determine recommendation
+        if score > 0.3:
+            recommendation = "BUY"
+            reasoning = f"Positive momentum with {price_change:.1f}% gain"
+        elif score < -0.3:
+            recommendation = "SELL"
+            reasoning = f"Negative momentum with {price_change:.1f}% loss"
+        else:
+            recommendation = "HOLD"
+            reasoning = f"Neutral market conditions with {price_change:.1f}% change"
+
+        # Add default items if empty
+        if not risks:
+            risks = ["Market volatility", "Crypto regulatory risks"]
+        if not opportunities:
+            opportunities = ["Potential trend reversal", "Market stabilization"]
+
+        return MarketSentiment(
+            score=max(-1, min(1, score)),
+            confidence=min(1, confidence),
+            key_factors=factors if factors else ["Price action analysis"],
+            risks=risks,
+            opportunities=opportunities,
+            recommendation=recommendation,
+            reasoning=reasoning,
         )
 
     async def analyze_uploaded_report(self, report_content: str) -> Dict:
