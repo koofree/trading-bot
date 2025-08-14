@@ -1,11 +1,20 @@
+"""
+Signal Generator
+Uses market data preprocessor for analysis and exports LLM-ready format
+"""
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Optional
+from typing import Any, Optional
 
-import numpy as np
 import pandas as pd
+
+from services.preprocessors.factory import (
+    PreprocessorOrchestrator,
+    analyze_market_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,427 +27,542 @@ class SignalType(Enum):
 
 @dataclass
 class TradingSignal:
+    """Enhanced trading signal with preprocessor data"""
+
     market: str
     signal_type: SignalType
     strength: float
     price: float
     volume: float
-    indicators: Dict
+    preprocessor_analysis: dict[str, Any]
+    llm_context: str
     reasoning: str
     timestamp: datetime
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "market": self.market,
             "signal_type": self.signal_type.value,
             "strength": self.strength,
             "price": self.price,
             "volume": self.volume,
-            "indicators": self.indicators,
+            "preprocessor_analysis": self.preprocessor_analysis,
+            "llm_context": self.llm_context,
             "reasoning": self.reasoning,
             "timestamp": self.timestamp.isoformat(),
         }
 
 
 class SignalGenerator:
-    def __init__(self, config: Dict):
+    """Signal generator using market data preprocessor"""
+
+    def __init__(self, config: dict):
         self.config = config
-        self.indicator_weights = config.get(
-            "indicator_weights",
+        self.orchestrator = PreprocessorOrchestrator()
+
+        # Configure which preprocessors to use
+        self.enabled_processors = config.get(
+            "enabled_processors",
+            ["candlestick", "volume", "price_action", "trend", "volatility"],
+        )
+
+        # Signal generation weights
+        self.signal_weights = config.get(
+            "signal_weights",
             {
-                "rsi": 0.2,
-                "macd": 0.25,
-                "ma": 0.15,
-                "bb": 0.15,
-                "volume": 0.1,
-                "sentiment": 0.15,
+                "candlestick": 0.15,
+                "volume": 0.15,
+                "price_action": 0.25,
+                "trend": 0.25,
+                "volatility": 0.10,
+                "llm": 0.10,
             },
         )
 
-    def calculate_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate all technical indicators"""
-        indicators = {}
-
-        try:
-            # Check if required columns exist
-            required_columns = ["close", "high", "low", "volume", "open"]
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                logger.warning(f"Missing columns in DataFrame: {missing_columns}")
-                logger.warning(f"Available columns: {df.columns.tolist()}")
-                # Return some default indicators instead of empty dict
-                if "close" in df.columns:
-                    current_price = df["close"].iloc[-1] if len(df) > 0 else 0
-                    indicators["current_price"] = current_price
-                    indicators["price_change"] = (
-                        (df["close"].iloc[-1] - df["close"].iloc[0])
-                        / df["close"].iloc[0]
-                        * 100
-                        if len(df) > 1
-                        else 0
-                    )
-                return indicators
-
-            # Moving Averages
-            indicators["sma_20"] = df["close"].rolling(window=20).mean()
-            indicators["sma_50"] = df["close"].rolling(window=50).mean()
-            indicators["sma_200"] = df["close"].rolling(window=200).mean()
-            indicators["ema_12"] = df["close"].ewm(span=12, adjust=False).mean()
-            indicators["ema_26"] = df["close"].ewm(span=26, adjust=False).mean()
-
-            # RSI
-            delta = df["close"].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            indicators["rsi"] = 100 - (100 / (1 + rs))
-
-            # MACD
-            indicators["macd"] = indicators["ema_12"] - indicators["ema_26"]
-            indicators["macd_signal"] = (
-                indicators["macd"].ewm(span=9, adjust=False).mean()
-            )
-            indicators["macd_histogram"] = (
-                indicators["macd"] - indicators["macd_signal"]
-            )
-
-            # Bollinger Bands
-            sma_20 = indicators["sma_20"]
-            std_20 = df["close"].rolling(window=20).std()
-            indicators["bb_upper"] = sma_20 + (std_20 * 2)
-            indicators["bb_middle"] = sma_20
-            indicators["bb_lower"] = sma_20 - (std_20 * 2)
-            indicators["bb_width"] = indicators["bb_upper"] - indicators["bb_lower"]
-            indicators["bb_percent"] = (
-                df["close"] - indicators["bb_lower"]
-            ) / indicators["bb_width"]
-
-            # Volume indicators
-            indicators["volume_sma"] = df["volume"].rolling(window=20).mean()
-            indicators["volume_ratio"] = df["volume"] / indicators["volume_sma"]
-            indicators["obv"] = (np.sign(df["close"].diff()) * df["volume"]).cumsum()
-
-            # Stochastic Oscillator
-            low_14 = df["low"].rolling(window=14).min()
-            high_14 = df["high"].rolling(window=14).max()
-            indicators["stoch_k"] = 100 * ((df["close"] - low_14) / (high_14 - low_14))
-            indicators["stoch_d"] = indicators["stoch_k"].rolling(window=3).mean()
-
-            # ATR (Average True Range)
-            high_low = df["high"] - df["low"]
-            high_close = np.abs(df["high"] - df["close"].shift())
-            low_close = np.abs(df["low"] - df["close"].shift())
-            ranges = pd.concat([high_low, high_close, low_close], axis=1)
-            true_range = ranges.max(axis=1)
-            indicators["atr"] = true_range.rolling(window=14).mean()
-
-            # Support and Resistance levels
-            indicators["support"] = df["low"].rolling(window=20).min()
-            indicators["resistance"] = df["high"].rolling(window=20).max()
-
-        except Exception as e:
-            logger.error(f"Error calculating indicators: {e}")
-
-        return indicators
+        # Thresholds
+        self.min_confidence = config.get("min_confidence", 0.6)
+        self.strong_signal_threshold = config.get("strong_signal_threshold", 0.8)
 
     def generate_signal(
-        self, market_data: pd.DataFrame, llm_analysis: Optional[Dict] = None
+        self,
+        market_data: pd.DataFrame,
+        llm_analysis: Optional[dict] = None,
+        orderbook_data: Optional[dict] = None,
     ) -> TradingSignal:
-        """Generate trading signal based on indicators and optional LLM analysis"""
+        """
+        Generate trading signal using preprocessor analysis
 
-        if len(market_data) < 200:
-            logger.warning(
-                f"Insufficient data for analysis: {len(market_data)} candles"
-            )
-            return self._create_hold_signal(market_data, "Insufficient data")
+        Args:
+            market_data: DataFrame with OHLCV data
+            llm_analysis: Optional LLM analysis results
+            orderbook_data: Optional orderbook data
 
-        indicators = self.calculate_indicators(market_data)
-        current = market_data.iloc[-1]
+        Returns:
+            TradingSignal with complete analysis
+        """
 
-        # Initialize scoring
-        buy_score = 0
-        sell_score = 0
-        reasons = []
+        # Prepare data for preprocessors
+        market_dict = market_data.to_dict("records")
 
-        # RSI Analysis
-        rsi_score, rsi_reason = self._analyze_rsi(indicators)
-        if rsi_score > 0:
-            buy_score += rsi_score * self.indicator_weights["rsi"]
-            reasons.append(rsi_reason)
-        elif rsi_score < 0:
-            sell_score += abs(rsi_score) * self.indicator_weights["rsi"]
-            reasons.append(rsi_reason)
+        # Run preprocessor analysis
+        preprocessor_results = analyze_market_data(
+            market_data=market_dict,
+            orderbook_data=orderbook_data,
+            processors=self.enabled_processors,
+        )
 
-        # MACD Analysis
-        macd_score, macd_reason = self._analyze_macd(indicators)
-        if macd_score > 0:
-            buy_score += macd_score * self.indicator_weights["macd"]
-            reasons.append(macd_reason)
-        elif macd_score < 0:
-            sell_score += abs(macd_score) * self.indicator_weights["macd"]
-            reasons.append(macd_reason)
+        # Extract analysis summary
+        analysis_summary = self._extract_analysis_summary(preprocessor_results)
 
-        # Moving Average Analysis
-        ma_score, ma_reason = self._analyze_moving_averages(indicators, current)
-        if ma_score > 0:
-            buy_score += ma_score * self.indicator_weights["ma"]
-            reasons.append(ma_reason)
-        elif ma_score < 0:
-            sell_score += abs(ma_score) * self.indicator_weights["ma"]
-            reasons.append(ma_reason)
+        # Generate LLM context
+        llm_context = self._format_for_llm(analysis_summary, market_data)
 
-        # Bollinger Bands Analysis
-        bb_score, bb_reason = self._analyze_bollinger_bands(indicators, current)
-        if bb_score > 0:
-            buy_score += bb_score * self.indicator_weights["bb"]
-            reasons.append(bb_reason)
-        elif bb_score < 0:
-            sell_score += abs(bb_score) * self.indicator_weights["bb"]
-            reasons.append(bb_reason)
-
-        # Volume Analysis
-        volume_score, volume_reason = self._analyze_volume(indicators)
-        if volume_score != 0:
-            if buy_score > sell_score:
-                buy_score += abs(volume_score) * self.indicator_weights["volume"]
-            else:
-                sell_score += abs(volume_score) * self.indicator_weights["volume"]
-            reasons.append(volume_reason)
-
-        # LLM Sentiment Analysis
-        if llm_analysis:
-            sentiment_score = llm_analysis.get("sentiment_score", 0)
-            if sentiment_score > 0.3:
-                buy_score += sentiment_score * self.indicator_weights["sentiment"]
-                reasons.append(f"Positive sentiment ({sentiment_score:.2f})")
-            elif sentiment_score < -0.3:
-                sell_score += abs(sentiment_score) * self.indicator_weights["sentiment"]
-                reasons.append(f"Negative sentiment ({sentiment_score:.2f})")
+        # Calculate signal scores
+        buy_score, sell_score, signal_reasons = self._calculate_signal_scores(
+            analysis_summary, llm_analysis
+        )
 
         # Determine final signal
-        min_confidence = self.config.get("min_confidence", 0.6)
+        signal_type, strength = self._determine_signal(buy_score, sell_score)
 
-        # Log the scores for debugging
-        logger.info(f"Signal scores - Buy: {buy_score:.2f}, Sell: {sell_score:.2f}")
-        logger.info(f"Signal reasons: {reasons}")
+        # Calculate position size
+        volume = self._calculate_position_size(strength, market_data["close"].iloc[-1])
 
-        if buy_score > min_confidence and buy_score > sell_score * 1.2:
+        # Generate reasoning
+        reasoning = self._generate_reasoning(
+            signal_type, signal_reasons, analysis_summary
+        )
+
+        return TradingSignal(
+            market=market_data.get("market", ["UNKNOWN"])[0]
+            if "market" in market_data
+            else "UNKNOWN",
+            signal_type=signal_type,
+            strength=strength,
+            price=market_data["close"].iloc[-1],
+            volume=volume,
+            preprocessor_analysis=analysis_summary,
+            llm_context=llm_context,
+            reasoning=reasoning,
+            timestamp=datetime.now(),
+        )
+
+    def _extract_analysis_summary(self, results: dict) -> dict[str, Any]:
+        """Extract key insights from preprocessor results"""
+
+        summary = {
+            "signals": [],
+            "metrics": {},
+            "patterns": {},
+            "indicators": {},
+            "market_conditions": {},
+        }
+
+        for processor_name, result in results.items():
+            if not result.is_valid():
+                continue
+
+            # Collect all signals
+            summary["signals"].extend(
+                [{"processor": processor_name, "signal": sig} for sig in result.signals]
+            )
+
+            # Collect metrics
+            summary["metrics"][processor_name] = result.metrics
+
+            # Extract specific insights based on processor type
+            if processor_name == "candlestick":
+                summary["patterns"]["candlestick"] = {
+                    "current_pattern": result.data.get("current_candle", {}),
+                    "patterns_found": result.data.get("patterns", []),
+                    "candle_strength": result.data.get("candle_strength", {}),
+                }
+
+            elif processor_name == "volume":
+                summary["indicators"]["volume"] = {
+                    "obv_trend": result.data.get("indicators", {}).get("obv_trend"),
+                    "volume_phase": result.data.get("patterns", {}).get("phase"),
+                    "volume_trend": result.data.get("patterns", {}).get("volume_trend"),
+                    "mfi": result.data.get("indicators", {}).get("mfi"),
+                }
+
+            elif processor_name == "price_action":
+                summary["patterns"]["price_action"] = {
+                    "breakouts": result.data.get("breakouts", {}),
+                    "key_levels": result.data.get("key_levels", {}),
+                    "market_structure": result.data.get("market_structure", {}),
+                }
+
+            elif processor_name == "trend":
+                summary["indicators"]["trend"] = {
+                    "direction": result.data.get("trend_direction"),
+                    "strength": result.data.get("trend_strength"),
+                    "ma_crossovers": result.data.get("ma_crossovers", {}),
+                    "trend_channel": result.data.get("trend_channel", {}),
+                }
+
+            elif processor_name == "volatility":
+                summary["market_conditions"]["volatility"] = {
+                    "regime": result.data.get("volatility_regime"),
+                    "current_volatility": result.data.get("current_volatility"),
+                    "bollinger_bands": result.data.get("bollinger_bands", {}),
+                    "atr": result.data.get("atr", {}),
+                }
+
+        return summary
+
+    def _format_for_llm(self, analysis: dict, market_data: pd.DataFrame) -> str:
+        """Format analysis for LLM consumption"""
+
+        # Current market state
+        current_price = market_data["close"].iloc[-1]
+        price_change_24h = (
+            (market_data["close"].iloc[-1] - market_data["close"].iloc[-24])
+            / market_data["close"].iloc[-24]
+            * 100
+            if len(market_data) >= 24
+            else 0
+        )
+
+        llm_prompt = f"""
+## Market Analysis Summary
+
+### Current Market State
+- Current Price: {current_price:.2f}
+- 24h Change: {price_change_24h:+.2f}%
+- Market Phase: {analysis.get('indicators', {}).get('volume', {}).get('volume_phase', 'Unknown')}
+
+### Technical Indicators
+"""
+
+        # Trend Analysis
+        trend_info = analysis.get("indicators", {}).get("trend", {})
+        if trend_info:
+            strength_value = trend_info.get("strength", 0)
+            if strength_value is not None:
+                llm_prompt += f"""
+#### Trend
+- Direction: {trend_info.get('direction', 'Unknown')}
+- Strength: {strength_value:.1f}
+"""
+            else:
+                llm_prompt += f"""
+#### Trend
+- Direction: {trend_info.get('direction', 'Unknown')}
+- Strength: Unknown
+"""
+
+        # Volume Analysis
+        volume_info = analysis.get("indicators", {}).get("volume", {})
+        if volume_info:
+            mfi_value = volume_info.get("mfi", 0)
+            if mfi_value is not None:
+                llm_prompt += f"""
+#### Volume
+- OBV Trend: {volume_info.get('obv_trend', 'Unknown')}
+- Volume Phase: {volume_info.get('volume_phase', 'Unknown')}
+- MFI: {mfi_value:.1f}
+"""
+            else:
+                llm_prompt += f"""
+#### Volume
+- OBV Trend: {volume_info.get('obv_trend', 'Unknown')}
+- Volume Phase: {volume_info.get('volume_phase', 'Unknown')}
+- MFI: Unknown
+"""
+
+        # Volatility
+        volatility_info = analysis.get("market_conditions", {}).get("volatility", {})
+        if volatility_info:
+            current_vol = volatility_info.get("current_volatility", 0)
+            if current_vol is not None:
+                llm_prompt += f"""
+#### Volatility
+- Regime: {volatility_info.get('regime', 'Unknown')}
+- Current Volatility: {current_vol:.2f}%
+"""
+            else:
+                llm_prompt += f"""
+#### Volatility
+- Regime: {volatility_info.get('regime', 'Unknown')}
+- Current Volatility: Unknown
+"""
+
+        # Key Patterns
+        llm_prompt += "\n### Key Patterns Detected\n"
+
+        # Candlestick patterns
+        candle_patterns = (
+            analysis.get("patterns", {})
+            .get("candlestick", {})
+            .get("patterns_found", [])
+        )
+        if candle_patterns:
+            llm_prompt += "#### Candlestick Patterns\n"
+            for pattern in candle_patterns[:3]:  # Limit to top 3
+                llm_prompt += f"- {pattern}\n"
+
+        # Price action breakouts
+        breakouts = (
+            analysis.get("patterns", {}).get("price_action", {}).get("breakouts", {})
+        )
+        if any(breakouts.values()):
+            llm_prompt += "#### Breakouts\n"
+            for breakout_type, breakout_data in breakouts.items():
+                if breakout_data:
+                    llm_prompt += f"- {breakout_type}: {breakout_data}\n"
+
+        # Trading Signals
+        llm_prompt += "\n### Trading Signals\n"
+        signals = analysis.get("signals", [])
+        for signal_data in signals[:5]:  # Limit to top 5 signals
+            llm_prompt += f"- [{signal_data['processor']}] {signal_data['signal']}\n"
+
+        llm_prompt += """
+### Analysis Request
+Based on the above technical analysis, provide:
+1. Market sentiment assessment (bullish/bearish/neutral)
+2. Key support and resistance levels to watch
+3. Recommended trading action with risk assessment
+4. Any additional insights or warnings
+"""
+
+        return llm_prompt
+
+    def _calculate_signal_scores(
+        self, analysis: dict, llm_analysis: Optional[dict] = None
+    ) -> tuple[float, float, list[str]]:
+        """Calculate buy and sell scores from analysis"""
+
+        buy_score = 0.0
+        sell_score = 0.0
+        reasons = []
+
+        # Analyze signals from each processor
+        for signal_data in analysis.get("signals", []):
+            signal_text = signal_data["signal"].lower()
+            processor = signal_data["processor"]
+            weight = self.signal_weights.get(processor, 0.1)
+
+            # Determine signal direction
+            if any(
+                word in signal_text
+                for word in ["bullish", "buy", "uptrend", "accumulation"]
+            ):
+                buy_score += weight
+                reasons.append(f"[{processor}] {signal_data['signal']}")
+            elif any(
+                word in signal_text
+                for word in ["bearish", "sell", "downtrend", "distribution"]
+            ):
+                sell_score += weight
+                reasons.append(f"[{processor}] {signal_data['signal']}")
+
+        # Analyze trend direction
+        trend_direction = (
+            analysis.get("indicators", {}).get("trend", {}).get("direction")
+        )
+        trend_strength = (
+            analysis.get("indicators", {}).get("trend", {}).get("strength", 0)
+        )
+
+        if trend_direction == "uptrend" and abs(trend_strength) > 50:
+            buy_score += self.signal_weights.get("trend", 0.25) * (
+                abs(trend_strength) / 100
+            )
+            reasons.append(f"Strong uptrend (strength: {abs(trend_strength):.1f})")
+        elif trend_direction == "downtrend" and abs(trend_strength) > 50:
+            sell_score += self.signal_weights.get("trend", 0.25) * (
+                abs(trend_strength) / 100
+            )
+            reasons.append(f"Strong downtrend (strength: {abs(trend_strength):.1f})")
+
+        # Analyze breakouts
+        breakouts = (
+            analysis.get("patterns", {}).get("price_action", {}).get("breakouts", {})
+        )
+        if breakouts.get("resistance_break"):
+            buy_score += self.signal_weights.get("price_action", 0.25) * 0.5
+            reasons.append("Resistance breakout detected")
+        elif breakouts.get("support_break"):
+            sell_score += self.signal_weights.get("price_action", 0.25) * 0.5
+            reasons.append("Support breakdown detected")
+
+        # Volume confirmation
+        volume_phase = (
+            analysis.get("indicators", {}).get("volume", {}).get("volume_phase")
+        )
+        if volume_phase == "accumulation":
+            buy_score += self.signal_weights.get("volume", 0.15) * 0.5
+            reasons.append("Volume accumulation phase")
+        elif volume_phase == "distribution":
+            sell_score += self.signal_weights.get("volume", 0.15) * 0.5
+            reasons.append("Volume distribution phase")
+
+        # Volatility adjustment
+        vol_regime = (
+            analysis.get("market_conditions", {}).get("volatility", {}).get("regime")
+        )
+        if vol_regime in ["high", "extreme"]:
+            # Reduce signal strength in high volatility
+            buy_score *= 0.8
+            sell_score *= 0.8
+            reasons.append(f"Signal adjusted for {vol_regime} volatility")
+
+        # LLM sentiment if available
+        if llm_analysis:
+            sentiment_score = llm_analysis.get("sentiment_score", 0)
+            llm_weight = self.signal_weights.get("llm", 0.1)
+
+            if sentiment_score > 0.3:
+                buy_score += sentiment_score * llm_weight
+                reasons.append(f"Positive LLM sentiment ({sentiment_score:.2f})")
+            elif sentiment_score < -0.3:
+                sell_score += abs(sentiment_score) * llm_weight
+                reasons.append(f"Negative LLM sentiment ({sentiment_score:.2f})")
+            else:
+                # Include neutral/mild sentiment in reasoning if LLM analysis was provided
+                reasons.append(f"LLM sentiment analysis ({sentiment_score:.2f})")
+
+        return buy_score, sell_score, reasons
+
+    def _determine_signal(
+        self, buy_score: float, sell_score: float
+    ) -> tuple[SignalType, float]:
+        """Determine final signal type and strength"""
+
+        # Calculate net score
+        buy_score - sell_score
+
+        # Determine signal type based on scores
+        if buy_score > self.min_confidence and buy_score > sell_score * 1.2:
             signal_type = SignalType.BUY
             strength = min(buy_score, 1.0)
-        elif sell_score > min_confidence and sell_score > buy_score * 1.2:
+        elif sell_score > self.min_confidence and sell_score > buy_score * 1.2:
             signal_type = SignalType.SELL
             strength = min(sell_score, 1.0)
         else:
             signal_type = SignalType.HOLD
-            strength = max(buy_score, sell_score)  # Show the stronger signal strength
-            if not reasons:
-                reasons.append("Neutral market conditions")
+            strength = max(buy_score, sell_score)
 
-        # Calculate position size
-        volume = self._calculate_position_size(strength, current["close"])
-
-        return TradingSignal(
-            market=current.get("market", "UNKNOWN"),
-            signal_type=signal_type,
-            strength=strength,
-            price=current["close"],
-            volume=volume,
-            indicators={
-                k: float(v.iloc[-1]) if hasattr(v, "iloc") else v
-                for k, v in indicators.items()
-                if v is not None
-            },
-            reasoning=" | ".join(reasons) if reasons else "No clear signals",
-            timestamp=datetime.now(),
+        logger.info(
+            f"Signal determination - Buy: {buy_score:.2f}, Sell: {sell_score:.2f}, "
+            f"Signal: {signal_type.value}, Strength: {strength:.2f}"
         )
 
-    def _analyze_rsi(self, indicators: Dict) -> tuple:
-        """Analyze RSI indicator"""
-        if "rsi" not in indicators or indicators["rsi"] is None:
-            return 0, ""
+        return signal_type, strength
 
-        rsi = (
-            indicators["rsi"].iloc[-1]
-            if hasattr(indicators["rsi"], "iloc")
-            else indicators["rsi"]
-        )
+    def _calculate_position_size(self, strength: float, price: float) -> float:
+        """Calculate position size based on signal strength"""
 
-        if pd.isna(rsi):
-            return 0, ""
-
-        if rsi < 30:
-            return 1.0, f"RSI oversold ({rsi:.1f})"
-        elif rsi < 40:
-            return 0.5, f"RSI approaching oversold ({rsi:.1f})"
-        elif rsi > 70:
-            return -1.0, f"RSI overbought ({rsi:.1f})"
-        elif rsi > 60:
-            return -0.5, f"RSI approaching overbought ({rsi:.1f})"
-
-        return 0, ""
-
-    def _analyze_macd(self, indicators: Dict) -> tuple:
-        """Analyze MACD indicator"""
-        if "macd" not in indicators or indicators["macd"] is None:
-            return 0, ""
-        if "macd_signal" not in indicators or indicators["macd_signal"] is None:
-            return 0, ""
-
-        macd = (
-            indicators["macd"].iloc[-1]
-            if hasattr(indicators["macd"], "iloc")
-            else indicators["macd"]
-        )
-        macd_signal = (
-            indicators["macd_signal"].iloc[-1]
-            if hasattr(indicators["macd_signal"], "iloc")
-            else indicators["macd_signal"]
-        )
-        macd_prev = (
-            indicators["macd"].iloc[-2]
-            if hasattr(indicators["macd"], "iloc") and len(indicators["macd"]) > 1
-            else macd
-        )
-        macd_signal_prev = (
-            indicators["macd_signal"].iloc[-2]
-            if hasattr(indicators["macd_signal"], "iloc")
-            and len(indicators["macd_signal"]) > 1
-            else macd_signal
-        )
-        histogram = (
-            indicators["macd_histogram"].iloc[-1]
-            if "macd_histogram" in indicators
-            and hasattr(indicators["macd_histogram"], "iloc")
-            else 0
-        )
-
-        if pd.isna(macd) or pd.isna(macd_signal):
-            return 0, ""
-
-        # Check for crossovers
-        if macd > macd_signal and macd_prev <= macd_signal_prev:
-            return 1.0, "MACD bullish crossover"
-        elif macd < macd_signal and macd_prev >= macd_signal_prev:
-            return -1.0, "MACD bearish crossover"
-
-        # Check histogram trend
-        if histogram > 0 and abs(histogram) > abs(
-            indicators["macd_histogram"].iloc[-2]
-        ):
-            return 0.5, "MACD histogram strengthening (bullish)"
-        elif histogram < 0 and abs(histogram) > abs(
-            indicators["macd_histogram"].iloc[-2]
-        ):
-            return -0.5, "MACD histogram strengthening (bearish)"
-
-        return 0, ""
-
-    def _analyze_moving_averages(self, indicators: Dict, current: pd.Series) -> tuple:
-        """Analyze moving average indicators"""
-        price = current["close"]
-        sma_20 = indicators["sma_20"].iloc[-1]
-        sma_50 = indicators["sma_50"].iloc[-1]
-        sma_200 = (
-            indicators["sma_200"].iloc[-1] if len(indicators["sma_200"]) > 0 else None
-        )
-
-        score = 0
-        reasons = []
-
-        # Golden/Death cross
-        if not pd.isna(sma_50) and not pd.isna(sma_200) and sma_200 is not None:
-            if (
-                sma_50 > sma_200
-                and indicators["sma_50"].iloc[-2] <= indicators["sma_200"].iloc[-2]
-            ):
-                return 1.0, "Golden cross (SMA50 > SMA200)"
-            elif (
-                sma_50 < sma_200
-                and indicators["sma_50"].iloc[-2] >= indicators["sma_200"].iloc[-2]
-            ):
-                return -1.0, "Death cross (SMA50 < SMA200)"
-
-        # Price relative to MAs
-        if not pd.isna(sma_20):
-            if price > sma_20 * 1.02:
-                score += 0.3
-                reasons.append("Price above SMA20")
-            elif price < sma_20 * 0.98:
-                score -= 0.3
-                reasons.append("Price below SMA20")
-
-        if not pd.isna(sma_50):
-            if price > sma_50:
-                score += 0.4
-                reasons.append("Price above SMA50")
-            else:
-                score -= 0.4
-                reasons.append("Price below SMA50")
-
-        if reasons:
-            return score, " & ".join(reasons)
-        return 0, ""
-
-    def _analyze_bollinger_bands(self, indicators: Dict, current: pd.Series) -> tuple:
-        """Analyze Bollinger Bands"""
-        price = current["close"]
-        bb_upper = indicators["bb_upper"].iloc[-1]
-        bb_lower = indicators["bb_lower"].iloc[-1]
-        bb_percent = indicators["bb_percent"].iloc[-1]
-
-        if pd.isna(bb_upper) or pd.isna(bb_lower):
-            return 0, ""
-
-        if price <= bb_lower:
-            return 1.0, "Price at lower Bollinger Band (oversold)"
-        elif bb_percent < 0.2:
-            return 0.5, "Price near lower Bollinger Band"
-        elif price >= bb_upper:
-            return -1.0, "Price at upper Bollinger Band (overbought)"
-        elif bb_percent > 0.8:
-            return -0.5, "Price near upper Bollinger Band"
-
-        return 0, ""
-
-    def _analyze_volume(self, indicators: Dict) -> tuple:
-        """Analyze volume indicators"""
-        volume_ratio = indicators["volume_ratio"].iloc[-1]
-
-        if pd.isna(volume_ratio):
-            return 0, ""
-
-        if volume_ratio > 2.0:
-            return 1.0, f"Very high volume ({volume_ratio:.1f}x average)"
-        elif volume_ratio > 1.5:
-            return 0.5, f"High volume ({volume_ratio:.1f}x average)"
-        elif volume_ratio < 0.5:
-            return -0.3, f"Low volume ({volume_ratio:.1f}x average)"
-
-        return 0, ""
-
-    def _calculate_position_size(self, signal_strength: float, price: float) -> float:
-        """Calculate position size based on signal strength and risk management"""
         base_position = self.config.get("base_position_size", 0.02)
         max_position = self.config.get("max_position_size", 0.1)
 
-        position_size = base_position * signal_strength
+        # Scale position size with signal strength
+        position_size = base_position * (
+            0.5 + strength * 0.5
+        )  # 50% base + 50% variable
+
+        # Apply maximum limit
         position_size = min(position_size, max_position)
 
         return position_size
 
-    def _create_hold_signal(
-        self, market_data: pd.DataFrame, reason: str
-    ) -> TradingSignal:
-        """Create a HOLD signal with given reason"""
-        current = market_data.iloc[-1] if len(market_data) > 0 else {"close": 0}
+    def _generate_reasoning(
+        self, signal_type: SignalType, reasons: list[str], analysis: dict
+    ) -> str:
+        """Generate detailed reasoning for the signal"""
 
-        return TradingSignal(
-            market=current.get("market", "UNKNOWN"),
-            signal_type=SignalType.HOLD,
-            strength=0,
-            price=current.get("close", 0),
-            volume=0,
-            indicators={},
-            reasoning=reason,
-            timestamp=datetime.now(),
+        if not reasons:
+            return f"{signal_type.value} signal based on neutral market conditions"
+
+        # Build reasoning string
+        reasoning_parts = [f"{signal_type.value} signal generated based on:"]
+
+        # Prioritize LLM sentiment if present
+        llm_reasons = [r for r in reasons if "llm sentiment" in r.lower()]
+        other_reasons = [r for r in reasons if "llm sentiment" not in r.lower()]
+
+        # Add LLM reasons first if they exist, then other top reasons
+        prioritized_reasons = llm_reasons + other_reasons
+
+        # Add top reasons (limit to 5 to ensure LLM sentiment is included)
+        for reason in prioritized_reasons[:5]:
+            reasoning_parts.append(f"• {reason}")
+
+        # Add market context
+        vol_regime = (
+            analysis.get("market_conditions", {}).get("volatility", {}).get("regime")
         )
+        if vol_regime:
+            reasoning_parts.append(f"• Market volatility: {vol_regime}")
+
+        # Add risk warning if needed
+        if signal_type != SignalType.HOLD:
+            if vol_regime in ["high", "extreme"]:
+                reasoning_parts.append(
+                    "⚠️ High volatility - use strict risk management"
+                )
+            elif len(reasons) < 2:
+                reasoning_parts.append(
+                    "⚠️ Limited confirming signals - consider smaller position"
+                )
+
+        return "\n".join(reasoning_parts)
+
+    def export_llm_training_data(
+        self,
+        market_data: pd.DataFrame,
+        signal: TradingSignal,
+        actual_outcome: Optional[dict] = None,
+    ) -> dict:
+        """
+        Export signal data in format suitable for LLM training
+
+        Args:
+            market_data: Historical market data
+            signal: Generated signal
+            actual_outcome: Optional actual market outcome for training
+
+        Returns:
+            Dictionary formatted for LLM training
+        """
+
+        training_data = {
+            "timestamp": signal.timestamp.isoformat(),
+            "market": signal.market,
+            # Input context
+            "input": {
+                "llm_context": signal.llm_context,
+                "preprocessor_analysis": signal.preprocessor_analysis,
+                "market_snapshot": {
+                    "price": signal.price,
+                    "volume": market_data["volume"].iloc[-1]
+                    if "volume" in market_data
+                    else 0,
+                    "high_24h": market_data["high"].tail(24).max()
+                    if len(market_data) >= 24
+                    else signal.price,
+                    "low_24h": market_data["low"].tail(24).min()
+                    if len(market_data) >= 24
+                    else signal.price,
+                },
+            },
+            # Generated signal
+            "output": {
+                "signal_type": signal.signal_type.value,
+                "strength": signal.strength,
+                "reasoning": signal.reasoning,
+                "position_size": signal.volume,
+            },
+            # Training labels (if outcome provided)
+            "labels": actual_outcome if actual_outcome else None,
+            # Metadata
+            "metadata": {
+                "generator_version": "v2",
+                "enabled_processors": self.enabled_processors,
+                "signal_weights": self.signal_weights,
+            },
+        }
+
+        return training_data
