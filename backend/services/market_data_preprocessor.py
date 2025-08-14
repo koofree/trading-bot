@@ -37,13 +37,13 @@ class MarketDataPreprocessor:
             # Get ticker for current 24h stats
             ticker_data = self._fetch_ticker(market)
 
-            # Get candles for historical analysis
+            # Get candles for historical analysis - use more recent data
             candles_1h = self.upbit.get_candles(
-                market, "minutes", 60, 24
-            )  # 24 hours of hourly
+                market, "minutes", 5, 48
+            )  # 4 hours of 5-minute candles for medium-term analysis
             candles_5m = self.upbit.get_candles(
-                market, "minutes", 5, 100
-            )  # Recent 5-min candles
+                market, "minutes", 1, 60
+            )  # 1 hour of 1-minute candles for very recent trends
 
             # Process the data
             enriched_data = self._process_market_data(

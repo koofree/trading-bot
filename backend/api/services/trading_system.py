@@ -95,8 +95,8 @@ class TradingSystem:
                         market
                     )
 
-                    # Get candles for signal generation
-                    candles = self.upbit.get_candles(market, "minutes", 60, 200)
+                    # Get candles for signal generation - use 5-minute candles for more recent data
+                    candles = self.upbit.get_candles(market, "minutes", 5, 200)
 
                     if candles and enriched_data:
                         # Convert to DataFrame for technical analysis
@@ -124,8 +124,12 @@ class TradingSystem:
                             "summary": sentiment.reasoning,
                         }
 
-                        # Generate signal
-                        signal = self.signal_generator.generate_signal(df, llm_analysis)
+                        # Generate signal with current ticker price
+                        signal = self.signal_generator.generate_signal(
+                            df,
+                            llm_analysis,
+                            current_price=enriched_data.get("current_price"),
+                        )
 
                         # Broadcast signal
                         await self.manager.broadcast(
@@ -201,8 +205,8 @@ class TradingSystem:
                     f"Volume Ratio={enriched_data.get('volume_ratio', 0):.2f}"
                 )
 
-                # Get candles for technical analysis
-                candles = self.upbit.get_candles(market, "minutes", 60, 200)
+                # Get candles for technical analysis - use 5-minute candles for more recent data
+                candles = self.upbit.get_candles(market, "minutes", 5, 200)
 
                 if not candles:
                     logger.warning(f"No candle data received for {market}")
@@ -238,7 +242,9 @@ class TradingSystem:
                     "summary": f"{enriched_data.get('momentum', 'neutral')} momentum with {enriched_data.get('price_change_24h', 0):.1f}% change",
                 }
 
-                signal = self.signal_generator.generate_signal(df, llm_analysis)
+                signal = self.signal_generator.generate_signal(
+                    df, llm_analysis, current_price=enriched_data.get("current_price")
+                )
 
                 # Add enriched data to signal
                 signal_dict = signal.to_dict()

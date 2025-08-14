@@ -38,7 +38,9 @@ class Settings:
         # System Configuration
         self.min_confidence: float = 0.6
         self.position_check_interval: int = 10
-        self.signal_check_interval: int = 60
+        self.signal_check_interval: int = (
+            15  # Check signals every 15 seconds for more real-time data
+        )
         self.markets: list = ["KRW-ETH"]
 
         # Indicator weights

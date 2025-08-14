@@ -81,17 +81,19 @@ class TestSignalGenerator(unittest.TestCase):
         self.assertEqual(self.generator.signal_weights, self.config["signal_weights"])
         self.assertEqual(self.generator.min_confidence, self.config["min_confidence"])
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_generate_signal_basic(self, mock_analyze):
+    def test_generate_signal_basic(self):
         """Test basic signal generation"""
         # Mock preprocessor results
         mock_results = self._create_mock_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
-        # Generate signal
-        signal = self.generator.generate_signal(self.market_data)
+        # Mock the orchestrator's process_all method
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            # Generate signal
+            signal = self.generator.generate_signal(self.market_data)
 
-        # Verify signal structure
+            # Verify signal structure
         self.assertIsInstance(signal, TradingSignal)
         self.assertIn(
             signal.signal_type, [SignalType.BUY, SignalType.SELL, SignalType.HOLD]
@@ -181,28 +183,30 @@ class TestSignalGenerator(unittest.TestCase):
 
         return results
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_bullish_signal_generation(self, mock_analyze):
+    def test_bullish_signal_generation(self):
         """Test generation of bullish signal"""
         # Create strongly bullish results
         mock_results = self._create_mock_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(self.market_data)
 
         # Should generate BUY signal
         self.assertEqual(signal.signal_type, SignalType.BUY)
         self.assertGreater(signal.strength, 0.6)
         self.assertIn("uptrend", signal.reasoning.lower())
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_bearish_signal_generation(self, mock_analyze):
+    def test_bearish_signal_generation(self):
         """Test generation of bearish signal"""
         # Create bearish scenario
         mock_results = self._create_bearish_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(self.market_data)
 
         # Should generate SELL signal
         self.assertEqual(signal.signal_type, SignalType.SELL)
@@ -271,14 +275,15 @@ class TestSignalGenerator(unittest.TestCase):
 
         return results
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_hold_signal_generation(self, mock_analyze):
+    def test_hold_signal_generation(self):
         """Test generation of HOLD signal in neutral conditions"""
         # Create neutral/mixed results
         mock_results = self._create_neutral_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(self.market_data)
 
         # Should generate HOLD signal
         self.assertEqual(signal.signal_type, SignalType.HOLD)
@@ -409,19 +414,22 @@ class TestSignalGenerator(unittest.TestCase):
         self.assertEqual(signal_dict["reasoning"], "Test reasoning")
         self.assertIn("timestamp", signal_dict)
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_export_llm_training_data(self, mock_analyze):
+    def test_export_llm_training_data(self):
         """Test export of LLM training data"""
         mock_results = self._create_mock_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
-        # Generate signal
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            # Generate signal
+            signal = self.generator.generate_signal(self.market_data)
 
-        # Export training data
-        training_data = self.generator.export_llm_training_data(
-            self.market_data, signal, actual_outcome={"profit": 5.2, "success": True}
-        )
+            # Export training data
+            training_data = self.generator.export_llm_training_data(
+                self.market_data,
+                signal,
+                actual_outcome={"profit": 5.2, "success": True},
+            )
 
         # Verify training data structure
         self.assertIn("timestamp", training_data)
@@ -449,11 +457,9 @@ class TestSignalGenerator(unittest.TestCase):
             self.config["enabled_processors"],
         )
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_with_llm_analysis(self, mock_analyze):
+    def test_with_llm_analysis(self):
         """Test signal generation with LLM analysis input"""
         mock_results = self._create_mock_preprocessor_results()
-        mock_analyze.return_value = mock_results
 
         # Add LLM analysis
         llm_analysis = {
@@ -462,9 +468,12 @@ class TestSignalGenerator(unittest.TestCase):
             "key_insights": ["Strong momentum", "Breaking resistance"],
         }
 
-        signal = self.generator.generate_signal(
-            self.market_data, llm_analysis=llm_analysis
-        )
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(
+                self.market_data, llm_analysis=llm_analysis
+            )
 
         # Should incorporate LLM sentiment
         self.assertEqual(signal.signal_type, SignalType.BUY)
@@ -475,16 +484,17 @@ class TestSignalGenerator(unittest.TestCase):
             f"Expected 'sentiment' in reasoning but got: {signal.reasoning}",
         )
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_high_volatility_adjustment(self, mock_analyze):
+    def test_high_volatility_adjustment(self):
         """Test signal adjustment in high volatility"""
         mock_results = self._create_mock_preprocessor_results()
 
         # Set high volatility
         mock_results["volatility"].data["volatility_regime"] = "extreme"
-        mock_analyze.return_value = mock_results
 
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(self.market_data)
 
         # Signal should mention volatility adjustment
         self.assertIn("volatility", signal.reasoning.lower())
@@ -497,8 +507,7 @@ class TestSignalGenerator(unittest.TestCase):
         with self.assertRaises(Exception):
             self.generator.generate_signal(empty_df)
 
-    @patch("services.signal_generator.analyze_market_data")
-    def test_invalid_preprocessor_results(self, mock_analyze):
+    def test_invalid_preprocessor_results(self):
         """Test handling of invalid preprocessor results"""
 
         class MockResult:
@@ -516,9 +525,11 @@ class TestSignalGenerator(unittest.TestCase):
             proc: MockResult(valid=False)
             for proc in ["candlestick", "volume", "price_action", "trend", "volatility"]
         }
-        mock_analyze.return_value = mock_results
 
-        signal = self.generator.generate_signal(self.market_data)
+        with patch.object(
+            self.generator.orchestrator, "process_all", return_value=mock_results
+        ):
+            signal = self.generator.generate_signal(self.market_data)
 
         # Should still generate a signal (likely HOLD)
         self.assertIsInstance(signal, TradingSignal)

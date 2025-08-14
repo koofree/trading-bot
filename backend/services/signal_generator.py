@@ -11,10 +11,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from services.preprocessors.factory import (
-    PreprocessorOrchestrator,
-    analyze_market_data,
-)
+from services.preprocessors.factory import PreprocessorOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +55,15 @@ class SignalGenerator:
 
     def __init__(self, config: dict):
         self.config = config
-        self.orchestrator = PreprocessorOrchestrator()
 
         # Configure which preprocessors to use
         self.enabled_processors = config.get(
             "enabled_processors",
             ["candlestick", "volume", "price_action", "trend", "volatility"],
         )
+
+        # Create orchestrator with specified processors
+        self.orchestrator = PreprocessorOrchestrator(self.enabled_processors)
 
         # Signal generation weights
         self.signal_weights = config.get(
@@ -88,6 +87,7 @@ class SignalGenerator:
         market_data: pd.DataFrame,
         llm_analysis: Optional[dict] = None,
         orderbook_data: Optional[dict] = None,
+        current_price: Optional[float] = None,
     ) -> TradingSignal:
         """
         Generate trading signal using preprocessor analysis
@@ -104,12 +104,27 @@ class SignalGenerator:
         # Prepare data for preprocessors
         market_dict = market_data.to_dict("records")
 
-        # Run preprocessor analysis
-        preprocessor_results = analyze_market_data(
-            market_data=market_dict,
-            orderbook_data=orderbook_data,
-            processors=self.enabled_processors,
-        )
+        # Prepare data for orchestrator - each processor gets the same candle data
+        processor_data = {
+            "candlestick": market_dict,
+            "volume": market_dict,
+            "price_action": market_dict,
+            "trend": market_dict,
+            "volatility": market_dict,
+        }
+
+        # If we only have specific processors enabled, filter the data
+        if set(self.enabled_processors) != {
+            "candlestick",
+            "volume",
+            "price_action",
+            "trend",
+            "volatility",
+        }:
+            processor_data = {k: market_dict for k in self.enabled_processors}
+
+        # Run preprocessor analysis through orchestrator
+        preprocessor_results = self.orchestrator.process_all(processor_data)
 
         # Extract analysis summary
         analysis_summary = self._extract_analysis_summary(preprocessor_results)
@@ -125,8 +140,11 @@ class SignalGenerator:
         # Determine final signal
         signal_type, strength = self._determine_signal(buy_score, sell_score)
 
+        # Use current ticker price if available, otherwise use last candle close
+        signal_price = current_price if current_price else market_data["close"].iloc[-1]
+
         # Calculate position size
-        volume = self._calculate_position_size(strength, market_data["close"].iloc[-1])
+        volume = self._calculate_position_size(strength, signal_price)
 
         # Generate reasoning
         reasoning = self._generate_reasoning(
@@ -139,7 +157,7 @@ class SignalGenerator:
             else "UNKNOWN",
             signal_type=signal_type,
             strength=strength,
-            price=market_data["close"].iloc[-1],
+            price=signal_price,
             volume=volume,
             preprocessor_analysis=analysis_summary,
             llm_context=llm_context,
@@ -300,7 +318,12 @@ class SignalGenerator:
         if candle_patterns:
             llm_prompt += "#### Candlestick Patterns\n"
             for pattern in candle_patterns[:3]:  # Limit to top 3
-                llm_prompt += f"- {pattern}\n"
+                if isinstance(pattern, dict):
+                    pattern_name = pattern.get("name", "Unknown")
+                    pattern_type = pattern.get("type", "")
+                    llm_prompt += f"- {pattern_name} ({pattern_type})\n"
+                else:
+                    llm_prompt += f"- {pattern}\n"
 
         # Price action breakouts
         breakouts = (

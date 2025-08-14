@@ -66,6 +66,19 @@ const SignalCard: React.FC<SignalCardProps> = ({ signal, compact = false }) => {
     return date.toLocaleTimeString();
   };
 
+  const formatNumber = (num: number | undefined, decimals = 2): string => {
+    if (num === undefined || num === null) return 'N/A';
+    return num.toFixed(decimals);
+  };
+
+  // Extract preprocessed data
+  const analysis = signal.preprocessor_analysis;
+  const trend = analysis?.indicators?.trend;
+  const volume = analysis?.indicators?.volume;
+  const volatility = analysis?.market_conditions?.volatility;
+  const priceAction = analysis?.patterns?.price_action;
+  const candlestick = analysis?.patterns?.candlestick;
+
   if (compact) {
     return (
       <div className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
@@ -116,21 +129,155 @@ const SignalCard: React.FC<SignalCardProps> = ({ signal, compact = false }) => {
         </div>
       </div>
 
-      <div className="space-y-1 mb-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-600">Price:</span>
-          <span className="font-medium text-gray-800">{signal.price?.toLocaleString()} KRW</span>
+      {/* Market Overview */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="bg-gray-50 p-2 rounded">
+          <span className="text-xs text-gray-600">Price</span>
+          <p className="text-sm font-semibold text-gray-800">
+            {signal.price?.toLocaleString()} KRW
+          </p>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-600">Volume:</span>
-          <span className="font-medium text-gray-800">{signal.volume?.toFixed(4)}</span>
+        <div className="bg-gray-50 p-2 rounded">
+          <span className="text-xs text-gray-600">Position Size</span>
+          <p className="text-sm font-semibold text-gray-800">{formatNumber(signal.volume, 4)}</p>
         </div>
       </div>
+
+      {/* Preprocessed Analysis Data */}
+      {analysis && (
+        <div className="space-y-3 mb-3">
+          {/* Trend Analysis */}
+          {trend && (
+            <div className="border-l-4 border-blue-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Trend Analysis</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-gray-600">Direction: </span>
+                  <span className="font-medium capitalize">{trend.direction || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Strength: </span>
+                  <span className="font-medium">{formatNumber(trend.strength, 1)}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Volume Analysis */}
+          {volume && (
+            <div className="border-l-4 border-purple-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Volume Analysis</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-gray-600">Phase: </span>
+                  <span className="font-medium capitalize">{volume.volume_phase || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">MFI: </span>
+                  <span className="font-medium">{formatNumber(volume.mfi, 1)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">OBV: </span>
+                  <span className="font-medium capitalize">{volume.obv_trend || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Trend: </span>
+                  <span className="font-medium capitalize">{volume.volume_trend || 'N/A'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Volatility */}
+          {volatility && (
+            <div className="border-l-4 border-orange-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Volatility</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-gray-600">Regime: </span>
+                  <span className="font-medium capitalize">{volatility.regime || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Current: </span>
+                  <span className="font-medium">{formatNumber(volatility.current_volatility, 2)}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Price Action */}
+          {priceAction?.key_levels && (
+            <div className="border-l-4 border-yellow-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Key Levels</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-gray-600">Support: </span>
+                  <span className="font-medium">
+                    {priceAction.key_levels.strong_support?.toLocaleString() || 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Resistance: </span>
+                  <span className="font-medium">
+                    {priceAction.key_levels.strong_resistance?.toLocaleString() || 'N/A'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Candlestick Patterns */}
+          {candlestick?.patterns_found && candlestick.patterns_found.length > 0 && (
+            <div className="border-l-4 border-green-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Candlestick Patterns</p>
+              <div className="flex flex-wrap gap-1">
+                {candlestick.patterns_found.slice(0, 3).map((pattern, index) => (
+                  <span
+                    key={index}
+                    className="text-xs bg-gray-100 px-2 py-1 rounded capitalize"
+                  >
+                    {typeof pattern === 'string' ? pattern : pattern.name || 'Unknown'}
+                  </span>
+                ))}
+              </div>
+              {candlestick.candle_strength && (
+                <div className="mt-1 text-xs">
+                  <span className="text-gray-600">Bullish: </span>
+                  <span className="text-green-600 font-medium">
+                    {((candlestick.candle_strength.bullish_ratio ?? 0) * 100).toFixed(0)}%
+                  </span>
+                  <span className="text-gray-600 ml-2">Bearish: </span>
+                  <span className="text-red-600 font-medium">
+                    {((candlestick.candle_strength.bearish_ratio ?? 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Preprocessor Signals */}
+          {analysis.signals && analysis.signals.length > 0 && (
+            <div className="border-l-4 border-indigo-400 pl-3">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Analysis Signals</p>
+              <div className="space-y-1">
+                {analysis.signals.slice(0, 5).map((sig, index) => (
+                  <div key={index} className="text-xs">
+                    <span className="text-gray-600">[{sig.processor}]</span>{' '}
+                    <span className="text-gray-800">{sig.signal}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {signal.reasoning && (
         <div className="mb-3">
           <p className="text-sm text-gray-600 mb-1">Reasoning:</p>
-          <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded">{signal.reasoning}</p>
+          <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded whitespace-pre-line">
+            {signal.reasoning}
+          </p>
         </div>
       )}
 

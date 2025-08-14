@@ -14,7 +14,7 @@ export interface MarketData {
 
 // Signal Types
 export interface Signal {
-  signal_id: string;
+  signal_id?: string;
   market: string;
   signal_type: 'BUY' | 'SELL' | 'HOLD';
   strength: number;
@@ -23,6 +23,51 @@ export interface Signal {
   reasoning?: string;
   timestamp: string;
   confidence?: number;
+  preprocessor_analysis?: {
+    indicators?: {
+      trend?: {
+        direction?: string;
+        strength?: number;
+        ma_crossovers?: any;
+      };
+      volume?: {
+        obv_trend?: string;
+        volume_phase?: string;
+        volume_trend?: string;
+        mfi?: number;
+      };
+    };
+    patterns?: {
+      candlestick?: {
+        current_pattern?: any;
+        patterns_found?: (string | { name: string; type: string; strength: string; position: number })[];
+        candle_strength?: {
+          bullish_ratio?: number;
+          bearish_ratio?: number;
+        };
+      };
+      price_action?: {
+        breakouts?: any;
+        key_levels?: {
+          strong_support?: number;
+          strong_resistance?: number;
+        };
+      };
+    };
+    market_conditions?: {
+      volatility?: {
+        regime?: string;
+        current_volatility?: number;
+        bollinger_bands?: any;
+        atr?: any;
+      };
+    };
+    signals?: Array<{
+      processor: string;
+      signal: string;
+    }>;
+    metrics?: any;
+  };
   indicators?: {
     rsi?: number;
     macd?: number;
